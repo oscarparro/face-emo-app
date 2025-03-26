@@ -1,0 +1,5 @@
+opencv-python
+face_recognition
+cmake
+PySide6
+numpy
