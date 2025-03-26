@@ -1,0 +1,9 @@
+# Ignorar la carpeta del entorno virtual
+env/
+
+# Ignorar archivos compilados de Python
+__pycache__/
+*.pyc
+
+# Otros archivos o carpetas que no desees versionar
+embeddings.pkl
