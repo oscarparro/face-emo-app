@@ -3,3 +3,7 @@ face_recognition
 cmake
 PySide6
 numpy
+opencv-contrib-python
+mtcnn
+tensorflow
+
