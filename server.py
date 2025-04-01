@@ -4,7 +4,6 @@ from flask_cors import CORS
 import cv2
 import face_recognition
 import numpy as np
-from mtcnn import MTCNN
 import base64
 import io
 from PIL import Image
@@ -26,34 +25,19 @@ def process_embedding():
     image_b64 = data["image"]
     frame = decode_image(image_b64)
     rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    detector = MTCNN()
-    detections = detector.detect_faces(rgb_frame)
-    results = []
-    height, width, _ = rgb_frame.shape
 
-    for detection in detections:
-        if detection['confidence'] < 0.90:
-            continue
-        x, y, w, h = detection['box']
-        top = max(0, y)
-        left = max(0, x)
-        right = min(width, x + w)
-        bottom = min(height, y + h)
-        if bottom <= top or right <= left:
-            continue
-
-        face_image = rgb_frame[top:bottom, left:right]
-        if face_image.shape[0] < 20 or face_image.shape[1] < 20:
-            continue
-
-        # Llamamos sin known_face_locations porque el recorte ya es la cara
-        face_encodings = face_recognition.face_encodings(face_image)
-        if face_encodings:
-            results.append({
-                "box": [top, right, bottom, left],
-                "embedding": face_encodings[0].tolist()
-            })
-    return jsonify({"detections": results})
+    # Usamos el modelo 'hog' (sin MTCNN)
+    face_locations = face_recognition.face_locations(rgb_frame, model='hog')
+    face_encodings = face_recognition.face_encodings(rgb_frame, face_locations)
+    detections = []
+    for loc, encoding in zip(face_locations, face_encodings):
+        # loc es (top, right, bottom, left)
+        detections.append({
+            "box": list(loc),
+            "embedding": encoding.tolist()
+        })
+    return jsonify({"detections": detections})
 
 if __name__ == '__main__':
+    # Escucha en todas las interfaces en el puerto 5001
     app.run(host='0.0.0.0', port=5001)

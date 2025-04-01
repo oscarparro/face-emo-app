@@ -1,4 +1,3 @@
-# app_desktop.py
 import sys
 import os
 import pickle
@@ -10,16 +9,15 @@ import datetime
 import base64
 import requests
 
-from mtcnn import MTCNN
-
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel, QPushButton,
     QVBoxLayout, QHBoxLayout, QInputDialog, QMessageBox, QSizePolicy,
     QTableWidget, QTableWidgetItem, QHeaderView
 )
-from PySide6.QtCore import QTimer, Qt, QElapsedTimer, QThread, Signal
+from PySide6.QtCore import QTimer, Qt, QElapsedTimer
 from PySide6.QtGui import QImage, QPixmap, QColor, QIcon
 
+# Archivo unificado de registros (lista de diccionarios)
 EMBEDDINGS_FILE = "embeddings.pkl"
 
 def load_registrations():
@@ -38,52 +36,6 @@ def generate_color(name):
         return (0, 255, 0)
     h = hashlib.md5(name.encode()).hexdigest()
     return tuple(int(h[i:i+2], 16) for i in (0, 2, 4))
-
-class EmbeddingWorker(QThread):
-    """
-    Worker que envía el frame a un servidor para procesar los embeddings.
-    Recibe un frame y la lista de registros locales, y emite una lista de tuplas:
-    (top, right, bottom, left, nombre)
-    """
-    result_ready = Signal(list)
-    
-    def __init__(self, frame, registrations, parent=None):
-        super().__init__(parent)
-        self.frame = frame.copy()
-        self.registrations = registrations
-        
-    def run(self):
-        retval, buffer = cv2.imencode('.jpg', self.frame)
-        jpg_as_text = base64.b64encode(buffer).decode('utf-8')
-        url = "http://34.175.254.200:5001/process_embedding"  # Reemplaza <VM_IP> por la IP de tu VM.
-        data = {"image": jpg_as_text}
-        try:
-            response = requests.post(url, json=data)
-            if response.ok:
-                result = response.json()
-                detections = result.get("detections", [])
-                registered_encodings = [reg["embedding"] for reg in self.registrations]
-                registered_names = [reg["name"] for reg in self.registrations]
-                results = []
-                for det in detections:
-                    box = det.get("box")  # [top, right, bottom, left]
-                    emb = np.array(det.get("embedding"))
-                    name = "Desconocido"
-                    if registered_encodings:
-                        matches = face_recognition.compare_faces(registered_encodings, emb, tolerance=0.6)
-                        if any(matches):
-                            face_distances = face_recognition.face_distance(registered_encodings, emb)
-                            best_match_index = np.argmin(face_distances)
-                            if matches[best_match_index]:
-                                name = registered_names[best_match_index]
-                    results.append((box[0], box[1], box[2], box[3], name))
-                self.result_ready.emit(results)
-            else:
-                print("Server error:", response.text)
-                self.result_ready.emit([])
-        except Exception as e:
-            print("Error contacting server:", e)
-            self.result_ready.emit([])
 
 class InfoWindow(QMainWindow):
     """
@@ -109,24 +61,25 @@ class InfoWindow(QMainWindow):
         registrations = self.main_window.registrations_data
         self.table.setRowCount(len(registrations))
         for row, info in enumerate(registrations):
+            # Columna Imagen
             image_item = QTableWidgetItem()
             if os.path.exists(info['image_path']):
                 pixmap = QPixmap(info['image_path']).scaled(50, 50, Qt.KeepAspectRatio)
                 image_item.setIcon(QIcon(pixmap))
             image_item.setText(os.path.basename(info['image_path']))
             self.table.setItem(row, 0, image_item)
-
+            # Columna Nombre
             name_item = QTableWidgetItem(info['name'])
             self.table.setItem(row, 1, name_item)
-
+            # Columna Color
             color_item = QTableWidgetItem(f"RGB{info['color']}")
             r, g, b = info['color']
             color_item.setBackground(QColor(r, g, b))
             self.table.setItem(row, 2, color_item)
-
+            # Columna Fecha
             date_item = QTableWidgetItem(info['date'])
             self.table.setItem(row, 3, date_item)
-
+            # Columna Acciones: Botón Eliminar
             btn_delete = QPushButton("Eliminar")
             btn_delete.setStyleSheet("background-color: #f44336; color: white;")
             btn_delete.clicked.connect(lambda checked, row=row: self.delete_row(row))
@@ -177,6 +130,7 @@ class MainWindow(QMainWindow):
         self.btn_register.clicked.connect(self.register_face)
         btn_layout.addWidget(self.btn_register)
 
+        # Botón Información
         self.btn_info = QPushButton("Información")
         self.btn_info.setMaximumWidth(150)
         self.btn_info.setStyleSheet(
@@ -205,17 +159,50 @@ class MainWindow(QMainWindow):
         self.last_process_time = QElapsedTimer()
         self.last_process_time.start()
 
+        # Cargar registros unificados (lista de diccionarios)
         self.registrations_data = load_registrations()
 
         self.color_map = {"Desconocido": (0, 255, 0)}
-        self.recent_faces = []  # (top, right, bottom, left, nombre)
-
-        self.embedding_worker = None
-        self.mtcnn_detector = MTCNN()
+        self.recent_faces = []  # Cada elemento: (top, right, bottom, left, nombre)
 
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_frame)
         self.timer.start(60)
+
+    def process_embeddings_remote(self, frame):
+        # Envía el frame al servidor remoto para procesar los embeddings.
+        retval, buffer = cv2.imencode('.jpg', frame)
+        jpg_as_text = base64.b64encode(buffer).decode('utf-8')
+        url = "http://34.175.254.200:5001/process_embedding"  # IP y puerto configurados en la VM
+        data = {"image": jpg_as_text}
+        try:
+            response = requests.post(url, json=data, timeout=5)
+            if response.ok:
+                result = response.json()
+                detections = result.get("detections", [])
+                # Extraer los registros actuales para comparación
+                known_face_encodings = [reg["embedding"] for reg in self.registrations_data]
+                known_face_names = [reg["name"] for reg in self.registrations_data]
+                results = []
+                for det in detections:
+                    box = det.get("box")  # [top, right, bottom, left]
+                    emb = np.array(det.get("embedding"))
+                    name = "Desconocido"
+                    if known_face_encodings:
+                        matches = face_recognition.compare_faces(known_face_encodings, emb, tolerance=0.6)
+                        if any(matches):
+                            face_distances = face_recognition.face_distance(known_face_encodings, emb)
+                            best_match_index = np.argmin(face_distances)
+                            if matches[best_match_index]:
+                                name = known_face_names[best_match_index]
+                    results.append((box[0], box[1], box[2], box[3], name))
+                return results
+            else:
+                print("Server error:", response.text)
+                return []
+        except Exception as e:
+            print("Error contacting server:", e)
+            return []
 
     def update_frame(self):
         ret, frame = self.cap.read()
@@ -223,28 +210,36 @@ class MainWindow(QMainWindow):
             return
 
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        height, width, _ = rgb_frame.shape
+        # Procesamiento local de ubicaciones usando el modelo 'hog'
+        face_locations = face_recognition.face_locations(rgb_frame, model='hog')
 
-        detections = self.mtcnn_detector.detect_faces(rgb_frame)
-        face_locations = []
-        for detection in detections:
-            if detection['confidence'] < 0.90:
-                continue
-            x, y, w, h = detection['box']
-            top = max(0, y)
-            left = max(0, x)
-            right = min(width, x + w)
-            bottom = min(height, y + h)
-            if bottom <= top or right <= left:
-                continue
-            face_locations.append((top, right, bottom, left))
+        # Cada 3000 ms, se envía el frame al servidor remoto para procesar embeddings
+        if self.last_process_time.elapsed() > 3000:
+            remote_results = self.process_embeddings_remote(frame)
+            if remote_results:
+                self.recent_faces = remote_results
+            else:
+                # Si falla la conexión, se usa el procesamiento local
+                self.recent_faces.clear()
+                face_encodings = face_recognition.face_encodings(rgb_frame, face_locations)
+                for (top, right, bottom, left), face_encoding in zip(face_locations, face_encodings):
+                    matches = face_recognition.compare_faces(
+                        [reg["embedding"] for reg in self.registrations_data],
+                        face_encoding, tolerance=0.6)
+                    name = "Desconocido"
+                    if matches and any(matches):
+                        face_distances = face_recognition.face_distance(
+                            [reg["embedding"] for reg in self.registrations_data],
+                            face_encoding)
+                        best_match_index = np.argmin(face_distances)
+                        if matches[best_match_index]:
+                            name = [reg["name"] for reg in self.registrations_data][best_match_index]
+                    self.recent_faces.append((top, right, bottom, left, name))
+            self.last_process_time.restart()
+            self.update_legend()
 
-        for (top, right, bottom, left) in face_locations:
-            name = "Desconocido"
-            for (t, r, b, l, n) in self.recent_faces:
-                if abs(t - top) < 30 and abs(r - right) < 30 and abs(b - bottom) < 30 and abs(l - left) < 30:
-                    name = n
-                    break
+        # Dibujar bounding boxes en cada detección (ya sea remota o local)
+        for (top, right, bottom, left, name) in self.recent_faces:
             color = self.color_map.get(name, (0, 255, 0))
             width_box = right - left
             height_box = bottom - top
@@ -254,24 +249,13 @@ class MainWindow(QMainWindow):
             pt2 = (min(frame.shape[1], right + pad_w), min(frame.shape[0], bottom + pad_h))
             cv2.rectangle(frame, pt1, pt2, color, 2)
 
-        if self.last_process_time.elapsed() > 10000:
-            if self.embedding_worker is None or not self.embedding_worker.isRunning():
-                self.embedding_worker = EmbeddingWorker(frame, self.registrations_data)
-                self.embedding_worker.result_ready.connect(self.update_faces_worker)
-                self.embedding_worker.start()
-                self.last_process_time.restart()
-
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        h_frame, w_frame, ch = frame_rgb.shape
-        bytes_per_line = ch * w_frame
-        qimg = QImage(frame_rgb.data, w_frame, h_frame, bytes_per_line, QImage.Format_RGB888)
+        h, w, ch = frame_rgb.shape
+        bytes_per_line = ch * w
+        qimg = QImage(frame_rgb.data, w, h, bytes_per_line, QImage.Format_RGB888)
         pix = QPixmap.fromImage(qimg)
         pix = pix.scaled(800, 600, Qt.KeepAspectRatio, Qt.SmoothTransformation)
         self.video_label.setPixmap(pix)
-
-    def update_faces_worker(self, results):
-        self.recent_faces = results
-        self.update_legend()
 
     def update_legend(self):
         if not self.recent_faces:
@@ -298,44 +282,22 @@ class MainWindow(QMainWindow):
             return
 
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        height, width, _ = rgb_frame.shape
         try:
-            detector = MTCNN()
-            detections = detector.detect_faces(rgb_frame)
-            face_encodings = []
-            for detection in detections:
-                if detection['confidence'] < 0.90:
-                    continue
-                x, y, w, h = detection['box']
-                top = max(0, y)
-                left = max(0, x)
-                right = min(width, x + w)
-                bottom = min(height, y + h)
-                if bottom <= top or right <= left:
-                    continue
-                face_image = rgb_frame[top:bottom, left:right]
-                if face_image.shape[0] < 20 or face_image.shape[1] < 20:
-                    continue
-                try:
-                    face_encodings_found = face_recognition.face_encodings(face_image)
-                except Exception as e:
-                    face_encodings_found = face_recognition.face_encodings(face_image)
-                if face_encodings_found:
-                    face_encodings.append(face_encodings_found[0])
+            face_locations = face_recognition.face_locations(rgb_frame, model='hog')
+            face_encodings = face_recognition.face_encodings(rgb_frame, face_locations)
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Se produjo un error en face_recognition: {e}")
             return
 
         if len(face_encodings) == 1:
             new_encoding = face_encodings[0]
+            # Agregar el registro a la lista unificada
             os.makedirs("registered_faces", exist_ok=True)
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
             image_filename = f"registered_faces/{name.strip()}_{timestamp}.png"
             cv2.imwrite(image_filename, frame)
-
             color = generate_color(name.strip())
             date_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
             new_registration = {
                 "embedding": new_encoding,
                 "name": name.strip(),
@@ -345,10 +307,8 @@ class MainWindow(QMainWindow):
             }
             self.registrations_data.append(new_registration)
             save_registrations(self.registrations_data)
-
             if name.strip() not in self.color_map:
                 self.color_map[name.strip()] = color
-
             QMessageBox.information(self, "OK", f"Rostro registrado con el nombre: {name}")
         elif len(face_encodings) == 0:
             QMessageBox.warning(self, "Aviso", "No se detectó ninguna cara. Acércate o revisa iluminación.")
