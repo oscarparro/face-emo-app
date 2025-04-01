@@ -1,3 +1,4 @@
+# app_desktop.py
 import sys
 import os
 import pickle
@@ -6,6 +7,8 @@ import face_recognition
 import numpy as np
 import hashlib
 import datetime
+import base64
+import requests
 
 from mtcnn import MTCNN
 
@@ -40,64 +43,50 @@ def generate_color(name):
 
 class EmbeddingWorker(QThread):
     """
-    Worker para calcular embeddings usando MTCNN.
-    Recibe un frame y la lista actual de registros, y emite una lista de tuplas:
+    Worker que envía el frame a un servidor para procesar los embeddings.
+    Recibe un frame y la lista de registros locales, y emite una lista de tuplas:
     (top, right, bottom, left, nombre)
     """
     result_ready = Signal(list)
-
+    
     def __init__(self, frame, registrations, parent=None):
         super().__init__(parent)
         self.frame = frame.copy()
         self.registrations = registrations
-
+        
     def run(self):
-        rgb_frame = cv2.cvtColor(self.frame, cv2.COLOR_BGR2RGB)
-        detector = MTCNN()
-        detections = detector.detect_faces(rgb_frame)
-        results = []
-        height, width, _ = rgb_frame.shape
-
-        # Extraer embeddings y nombres de los registros actuales
-        registered_encodings = [reg["embedding"] for reg in self.registrations]
-        registered_names = [reg["name"] for reg in self.registrations]
-
-        for detection in detections:
-            if detection['confidence'] < 0.90:
-                continue
-            x, y, w, h = detection['box']
-            top = max(0, y)
-            left = max(0, x)
-            right = min(width, x + w)
-            bottom = min(height, y + h)
-            if bottom <= top or right <= left:
-                continue
-
-            face_image = rgb_frame[top:bottom, left:right]
-            # Verificar tamaño mínimo
-            if face_image.shape[0] < 20 or face_image.shape[1] < 20:
-                continue
-
-            try:
-                face_encodings = face_recognition.face_encodings(
-                    face_image,
-                    known_face_locations=[(0, face_image.shape[1], face_image.shape[0], 0)]
-                )
-            except TypeError:
-                face_encodings = face_recognition.face_encodings(face_image)
-
-            name = "Desconocido"
-            if face_encodings:
-                face_encoding = face_encodings[0]
-                if registered_encodings:
-                    matches = face_recognition.compare_faces(registered_encodings, face_encoding, tolerance=0.6)
-                    if any(matches):
-                        face_distances = face_recognition.face_distance(registered_encodings, face_encoding)
-                        best_match_index = np.argmin(face_distances)
-                        if matches[best_match_index]:
-                            name = registered_names[best_match_index]
-            results.append((top, right, bottom, left, name))
-        self.result_ready.emit(results)
+        # Codifica el frame a JPEG y luego a base64.
+        retval, buffer = cv2.imencode('.jpg', self.frame)
+        jpg_as_text = base64.b64encode(buffer).decode('utf-8')
+        url = "http://34.175.254.200:5001/process_embedding"  # Reemplaza <VM_IP> por la IP de tu VM.
+        data = {"image": jpg_as_text}
+        try:
+            response = requests.post(url, json=data)
+            if response.ok:
+                result = response.json()
+                detections = result.get("detections", [])
+                registered_encodings = [reg["embedding"] for reg in self.registrations]
+                registered_names = [reg["name"] for reg in self.registrations]
+                results = []
+                for det in detections:
+                    box = det.get("box")  # [top, right, bottom, left]
+                    emb = np.array(det.get("embedding"))
+                    name = "Desconocido"
+                    if registered_encodings:
+                        matches = face_recognition.compare_faces(registered_encodings, emb, tolerance=0.6)
+                        if any(matches):
+                            face_distances = face_recognition.face_distance(registered_encodings, emb)
+                            best_match_index = np.argmin(face_distances)
+                            if matches[best_match_index]:
+                                name = registered_names[best_match_index]
+                    results.append((box[0], box[1], box[2], box[3], name))
+                self.result_ready.emit(results)
+            else:
+                print("Server error:", response.text)
+                self.result_ready.emit([])
+        except Exception as e:
+            print("Error contacting server:", e)
+            self.result_ready.emit([])
 
 class InfoWindow(QMainWindow):
     """
@@ -130,21 +119,17 @@ class InfoWindow(QMainWindow):
                 image_item.setIcon(QIcon(pixmap))
             image_item.setText(os.path.basename(info['image_path']))
             self.table.setItem(row, 0, image_item)
-
             # Columna Nombre
             name_item = QTableWidgetItem(info['name'])
             self.table.setItem(row, 1, name_item)
-
             # Columna Color
             color_item = QTableWidgetItem(f"RGB{info['color']}")
             r, g, b = info['color']
             color_item.setBackground(QColor(r, g, b))
             self.table.setItem(row, 2, color_item)
-
             # Columna Fecha
             date_item = QTableWidgetItem(info['date'])
             self.table.setItem(row, 3, date_item)
-
             # Columna Acciones: Botón Eliminar
             btn_delete = QPushButton("Eliminar")
             btn_delete.setStyleSheet("background-color: #f44336; color: white;")
@@ -403,7 +388,6 @@ class MainWindow(QMainWindow):
         event.accept()
 
 def main():
-    # Asegúrate de eliminar o renombrar el embeddings.pkl antiguo para usar el nuevo formato.
     app = QApplication(sys.argv)
     window = MainWindow()
     window.show()
