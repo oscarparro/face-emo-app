@@ -6,4 +6,6 @@ numpy
 opencv-contrib-python
 mtcnn
 tensorflow
+flask 
+flask-cors
 
