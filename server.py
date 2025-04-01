@@ -46,13 +46,8 @@ def process_embedding():
         if face_image.shape[0] < 20 or face_image.shape[1] < 20:
             continue
 
-        try:
-            face_encodings = face_recognition.face_encodings(
-                face_image,
-                known_face_locations=[(0, face_image.shape[1], face_image.shape[0], 0)]
-            )
-        except TypeError:
-            face_encodings = face_recognition.face_encodings(face_image)
+        # Llamamos sin known_face_locations porque el recorte ya es la cara
+        face_encodings = face_recognition.face_encodings(face_image)
         if face_encodings:
             results.append({
                 "box": [top, right, bottom, left],

@@ -23,7 +23,6 @@ from PySide6.QtGui import QImage, QPixmap, QColor, QIcon
 EMBEDDINGS_FILE = "embeddings.pkl"
 
 def load_registrations():
-    """Carga la lista de registros (lista de diccionarios) desde embeddings.pkl."""
     if os.path.exists(EMBEDDINGS_FILE):
         with open(EMBEDDINGS_FILE, "rb") as f:
             return pickle.load(f)
@@ -31,7 +30,6 @@ def load_registrations():
         return []
 
 def save_registrations(registrations):
-    """Guarda la lista de registros en embeddings.pkl."""
     with open(EMBEDDINGS_FILE, "wb") as f:
         pickle.dump(registrations, f)
 
@@ -55,7 +53,6 @@ class EmbeddingWorker(QThread):
         self.registrations = registrations
         
     def run(self):
-        # Codifica el frame a JPEG y luego a base64.
         retval, buffer = cv2.imencode('.jpg', self.frame)
         jpg_as_text = base64.b64encode(buffer).decode('utf-8')
         url = "http://34.175.254.200:5001/process_embedding"  # Reemplaza <VM_IP> por la IP de tu VM.
@@ -112,25 +109,24 @@ class InfoWindow(QMainWindow):
         registrations = self.main_window.registrations_data
         self.table.setRowCount(len(registrations))
         for row, info in enumerate(registrations):
-            # Columna Imagen
             image_item = QTableWidgetItem()
             if os.path.exists(info['image_path']):
                 pixmap = QPixmap(info['image_path']).scaled(50, 50, Qt.KeepAspectRatio)
                 image_item.setIcon(QIcon(pixmap))
             image_item.setText(os.path.basename(info['image_path']))
             self.table.setItem(row, 0, image_item)
-            # Columna Nombre
+
             name_item = QTableWidgetItem(info['name'])
             self.table.setItem(row, 1, name_item)
-            # Columna Color
+
             color_item = QTableWidgetItem(f"RGB{info['color']}")
             r, g, b = info['color']
             color_item.setBackground(QColor(r, g, b))
             self.table.setItem(row, 2, color_item)
-            # Columna Fecha
+
             date_item = QTableWidgetItem(info['date'])
             self.table.setItem(row, 3, date_item)
-            # Columna Acciones: Botón Eliminar
+
             btn_delete = QPushButton("Eliminar")
             btn_delete.setStyleSheet("background-color: #f44336; color: white;")
             btn_delete.clicked.connect(lambda checked, row=row: self.delete_row(row))
@@ -209,7 +205,6 @@ class MainWindow(QMainWindow):
         self.last_process_time = QElapsedTimer()
         self.last_process_time.start()
 
-        # Cargar registros (lista de diccionarios)
         self.registrations_data = load_registrations()
 
         self.color_map = {"Desconocido": (0, 255, 0)}
@@ -322,11 +317,8 @@ class MainWindow(QMainWindow):
                 if face_image.shape[0] < 20 or face_image.shape[1] < 20:
                     continue
                 try:
-                    face_encodings_found = face_recognition.face_encodings(
-                        face_image,
-                        known_face_locations=[(0, face_image.shape[1], face_image.shape[0], 0)]
-                    )
-                except TypeError:
+                    face_encodings_found = face_recognition.face_encodings(face_image)
+                except Exception as e:
                     face_encodings_found = face_recognition.face_encodings(face_image)
                 if face_encodings_found:
                     face_encodings.append(face_encodings_found[0])
