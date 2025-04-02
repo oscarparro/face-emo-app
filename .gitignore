@@ -7,3 +7,4 @@ __pycache__/
 
 # Otros archivos o carpetas que no desees versionar
 embeddings.pkl
+registered_faces/
