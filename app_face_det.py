@@ -1,5 +1,3 @@
-#app_face_det.py
-
 import sys
 import os
 import pickle
@@ -259,15 +257,22 @@ class MainWindow(QMainWindow):
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
             image_filename = f"registered_faces/{name.strip()}_{timestamp}.png"
             cv2.imwrite(image_filename, face_crop)
-            face_encodings.append(new_encoding)
-            known_face_names.append(name.strip())
-            save_embeddings()
+            # Agregar el registro unificado
+            self.registrations_data.append({
+                "embedding": new_encoding,
+                "name": name.strip(),
+                "image_path": image_filename,
+                "color": generate_color(name.strip()),
+                "date": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            })
+            save_registrations(self.registrations_data)
+            if name.strip() not in self.color_map:
+                self.color_map[name.strip()] = generate_color(name.strip())
             QMessageBox.information(self, "OK", f"Rostro registrado con el nombre: {name}")
         elif len(face_encodings) == 0:
             QMessageBox.warning(self, "Aviso", "No se detectó ninguna cara. Acércate o revisa iluminación.")
         else:
             QMessageBox.warning(self, "Aviso", "Se detectaron varias caras. Asegúrate de estar solo en la imagen.")
-
 
     def delete_registration(self, index):
         try:

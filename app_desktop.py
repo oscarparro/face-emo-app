@@ -291,11 +291,14 @@ class MainWindow(QMainWindow):
 
         if len(face_encodings) == 1:
             new_encoding = face_encodings[0]
-            # Agregar el registro a la lista unificada
+            # Se obtiene el bounding box de la cara detectada (se asume que es la primera)
+            (top, right, bottom, left) = face_locations[0]
+            # Se recorta solo la región de la cara del frame original
+            face_crop = frame[top:bottom, left:right]
             os.makedirs("registered_faces", exist_ok=True)
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
             image_filename = f"registered_faces/{name.strip()}_{timestamp}.png"
-            cv2.imwrite(image_filename, frame)
+            cv2.imwrite(image_filename, face_crop)
             color = generate_color(name.strip())
             date_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             new_registration = {
