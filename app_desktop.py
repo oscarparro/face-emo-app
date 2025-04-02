@@ -1,5 +1,3 @@
-#app_desktop.py
-
 import sys
 import os
 import pickle
@@ -212,10 +210,11 @@ class MainWindow(QMainWindow):
             return
 
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        # Procesamiento local de ubicaciones usando el modelo 'hog'
         face_locations = face_recognition.face_locations(rgb_frame, model='hog')
 
         # Cada 3000 ms, se envía el frame al servidor remoto para procesar embeddings
-        if self.last_process_time.elapsed() > 5000:
+        if self.last_process_time.elapsed() > 3000:
             remote_results = self.process_embeddings_remote(frame)
             if remote_results:
                 self.recent_faces = remote_results
@@ -283,7 +282,6 @@ class MainWindow(QMainWindow):
             return
 
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
         try:
             face_locations = face_recognition.face_locations(rgb_frame, model='hog')
             face_encodings = face_recognition.face_encodings(rgb_frame, face_locations)
@@ -293,22 +291,29 @@ class MainWindow(QMainWindow):
 
         if len(face_encodings) == 1:
             new_encoding = face_encodings[0]
-            # Recortar solo la región de la cara usando el bounding box detectado.
-            (top, right, bottom, left) = face_locations[0]
-            face_crop = frame[top:bottom, left:right]
+            # Agregar el registro a la lista unificada
             os.makedirs("registered_faces", exist_ok=True)
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
             image_filename = f"registered_faces/{name.strip()}_{timestamp}.png"
-            cv2.imwrite(image_filename, face_crop)
-            known_face_encodings.append(new_encoding)
-            known_face_names.append(name.strip())
-            save_embeddings()
+            cv2.imwrite(image_filename, frame)
+            color = generate_color(name.strip())
+            date_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            new_registration = {
+                "embedding": new_encoding,
+                "name": name.strip(),
+                "image_path": image_filename,
+                "color": color,
+                "date": date_str
+            }
+            self.registrations_data.append(new_registration)
+            save_registrations(self.registrations_data)
+            if name.strip() not in self.color_map:
+                self.color_map[name.strip()] = color
             QMessageBox.information(self, "OK", f"Rostro registrado con el nombre: {name}")
         elif len(face_encodings) == 0:
             QMessageBox.warning(self, "Aviso", "No se detectó ninguna cara. Acércate o revisa iluminación.")
         else:
             QMessageBox.warning(self, "Aviso", "Se detectaron varias caras. Asegúrate de estar solo en la imagen.")
-
 
     def delete_registration(self, index):
         try:
