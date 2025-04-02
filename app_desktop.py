@@ -272,7 +272,7 @@ class MainWindow(QMainWindow):
                 html += f'<span style="color:{color_hex};">&#9632;</span> {name}<br>'
         self.legend_label.setText(html)
 
-def register_face(self):
+    def register_face(self):
         name, ok = QInputDialog.getText(self, "Registrar Rostro", "Introduce tu nombre:")
         if not ok or not name.strip():
             return
