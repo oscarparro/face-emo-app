@@ -26,7 +26,6 @@ def process_embedding():
     frame = decode_image(image_b64)
     rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
-    # Usamos el modelo 'hog' (sin MTCNN)
     face_locations = face_recognition.face_locations(rgb_frame, model='hog')
     face_encodings = face_recognition.face_encodings(rgb_frame, face_locations)
     detections = []
@@ -39,5 +38,4 @@ def process_embedding():
     return jsonify({"detections": detections})
 
 if __name__ == '__main__':
-    # Escucha en todas las interfaces en el puerto 5001
     app.run(host='0.0.0.0', port=5001)
